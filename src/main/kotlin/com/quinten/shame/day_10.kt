@@ -1,6 +1,12 @@
 package com.quinten.shame
 
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.system.measureTimeMillis
+import com.microsoft.z3.* // 🔔 Shame!
 
 class DayTen() {
     val puzzleInput = javaClass.getResource("/day10/input.txt")
@@ -11,7 +17,8 @@ class DayTen() {
             ButtonMash(
                 expectedState = splits[0].drop(1)
                     .dropLast(1),
-                joltages = splits.last().toNumbers(),
+                joltages = splits.last()
+                    .toNumbers(),
                 buttons = splits.drop(1)
                     .dropLast(1)
                     .map { buttonEntry -> buttonEntry.toNumbers() })
@@ -49,9 +56,10 @@ class DayTen() {
                 newOp
             }
         }
+
         fun Char.flip() = if (this == '.') '#' else '.'
     }
-    
+
     data class OperationB(
         val currState: List<Int>,
         val expectedState: List<Int>,
@@ -125,7 +133,8 @@ class DayTen() {
                                 }
                             }
                         }
-                    }.flatten()
+                    }
+                        .flatten()
                     operations.clear()
                     operations.addAll(newOps)
                 }
@@ -135,65 +144,119 @@ class DayTen() {
         return leastButtonPresses
     }
 
-    fun b(): Long {
-        val leastButtonPresses = puzzleInput.sumOf {
-            var bestResult = -1L
-            val operations = mutableListOf<OperationB>()
-            val pastOperations = mutableSetOf<String>()
-            with(it) {
-                val currState = List(expectedState.length) { 0 }
-                buttons.forEachIndexed { index, button ->
-                    operations.add(
-                        OperationB(
-                            currState = currState,
-                            expectedState = joltages,
-                            ops = listOf(),
-                            operation = Pair(index, button),
-                        )
-                    )
-                }
-                var searching = true
-                while (searching) {
-                    val newOps = operations.map {
-                        if (!searching) {
-                            // we can stop
-                            listOf(it)
-                        } else {
-                            val newOp = it.findOut()
-                            if (newOp.success) {
-                                searching = false
-                                bestResult = newOp.ops.size.toLong()
-                                listOf(it)
-                            } else {
-                                val newOperations = buttons.mapIndexed { index, buttonSeq ->
-                                    val newOperationSequence = (newOp.ops + index).sorted().joinToString(separator = "")
-                                    if (pastOperations.contains(newOperationSequence) || newOp.tooHigh) {
-                                        // We don't have to do the same operation sequence again
-                                        // 1 we have seen sequence before
-                                        // 2 the sequence is already past the limit
-                                        pastOperations.add(newOperationSequence) // in case of 2
-                                        null
+    fun newB(): Long {
+        return puzzleInput.sumOf {
+            solveJoltages(it).toLong()
+        }
+    }
+    
+    suspend fun b(): Long {
+        val leastButtonPresses: List<Job>
+        val map = mutableMapOf<Int, Long>()
+        coroutineScope {
+            leastButtonPresses = puzzleInput.mapIndexed { index, it -> Pair(index, it) }.sortedBy { it.second.expectedState.length }.map { (index, it) ->
+                
+                println("starting routine for $index")
+                val job = launch(context = Dispatchers.Default + CoroutineName("routine_for_${it.expectedState}")) {
+                    var bestResult = -1L
+                    val operations = mutableListOf<OperationB>()
+                    val pastOperations = mutableSetOf<String>()
+                    with(it) {
+                        val currState = List(expectedState.length) { 0 }
+                        buttons.forEachIndexed { index, button ->
+                            operations.add(
+                                OperationB(
+                                    currState = currState,
+                                    expectedState = joltages,
+                                    ops = listOf(),
+                                    operation = Pair(index, button),
+                                )
+                            )
+                        }
+                        var searching = true
+                        while (searching) {
+                            val newOps = operations.map {
+                                if (!searching) {
+                                    // we can stop
+                                    listOf(it)
+                                } else {
+                                    val newOp = it.findOut()
+                                    if (newOp.success) {
+                                        searching = false
+                                        bestResult = newOp.ops.size.toLong()
+                                        listOf(it)
                                     } else {
-                                        pastOperations.add(newOperationSequence)
-                                        newOp.copy(operation = Pair(index, buttonSeq))
+                                        val newOperations = buttons.mapIndexed { index, buttonSeq ->
+                                            val newOperationSequence = (newOp.ops + index).sorted()
+                                                .joinToString(separator = "")
+                                            if (pastOperations.contains(newOperationSequence) || newOp.tooHigh) {
+                                                // We don't have to do the same operation sequence again
+                                                // 1 we have seen sequence before
+                                                // 2 the sequence is already past the limit
+                                                pastOperations.add(newOperationSequence) // in case of 2
+                                                null
+                                            } else {
+                                                pastOperations.add(newOperationSequence)
+                                                newOp.copy(operation = Pair(index, buttonSeq))
+                                            }
+                                        }
+                                        //println("${newOperations.size} -> pruning -> ${newOperations.filterNotNull().size}")
+                                        newOperations.filterNotNull()
                                     }
                                 }
-                                //println("${newOperations.size} -> pruning -> ${newOperations.filterNotNull().size}")
-                                newOperations.filterNotNull()
                             }
+                                .flatten()
+                            operations.clear()
+                            operations.addAll(newOps)
                         }
-                    }.flatten()
-                    operations.clear()
-                    operations.addAll(newOps)
+                    }
+                    println("========input $index=========")
+                    println("operation size: ${operations.size}")
+                    println("sequences seen: ${pastOperations.size}")
+                    println("best result: $bestResult")
+                    map[index] = bestResult
                 }
+                println("started routine for $index")
+                job
             }
-            println("=================")
-            println("operation size: ${operations.size}")
-            println("sequences seen: ${pastOperations.size}")
-            println("best result: $bestResult")
-            bestResult
         }
-        return leastButtonPresses
+        println(leastButtonPresses)
+        leastButtonPresses.map { it.join() }
+        return map.values.sum()
+    }
+
+    private fun solveJoltages(config: ButtonMash): Int = Context().use { ctx ->
+        val solver = ctx.mkOptimize()
+        val zero = ctx.mkInt(0)
+
+        // Counts number of presses for each button, and ensures it is positive.
+        val buttons = config.buttons.indices
+            .map { ctx.mkIntConst("button#$it") }
+            .onEach { button -> solver.Add(ctx.mkGe(button, zero)) }
+            .toTypedArray()
+
+        // For each joltage counter, require that the sum of presses of all buttons that increment it is equal to the
+        // target value specified in the config.
+        config.joltages.forEachIndexed { counter, targetValue ->
+            val buttonsThatIncrement = config.buttons
+                .withIndex()
+                .filter { (_, counters) -> counter in counters }
+                .map { buttons[it.index] }
+                .toTypedArray()
+            val target = ctx.mkInt(targetValue)
+            val sumOfPresses = ctx.mkAdd(*buttonsThatIncrement) as IntExpr
+            solver.Add(ctx.mkEq(sumOfPresses, target))
+        }
+
+        // Describe that the presses (solution answer) is the sum of all individual button presses, and should be as
+        // low as possible.
+        val presses = ctx.mkIntConst("presses")
+        solver.Add(ctx.mkEq(presses, ctx.mkAdd(*buttons)))
+        solver.MkMinimize(presses)
+
+        // Find solution and return.
+        if (solver.Check() != Status.SATISFIABLE) error("No solution found for machine: $config.")
+        solver.getModel().evaluate(presses, false).let { it as IntNum }.int
     }
 }
 
@@ -215,7 +278,7 @@ fun main() {
         result1 = 1L
     }
     val time2 = measureTimeMillis {
-        result2 = day.b()
+        result2 = day.newB()
     }
     println("=== Summary ===")
     println("Init time was $initTime ms")
