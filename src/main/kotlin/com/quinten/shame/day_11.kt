@@ -77,11 +77,11 @@ class DayEleven() {
 }
 
 fun main() {
-    val day: DayEleven
+    val day: DayTwelve
     val result1: Long
     val result2: Long
     val initTime = measureTimeMillis {
-        day = DayEleven()
+        day = DayTwelve()
     }
     val time1 = measureTimeMillis {
         result1 = day.a()
